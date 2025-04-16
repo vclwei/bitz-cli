@@ -1,7 +1,7 @@
 use std::io::Read;
 
 use chrono::{Local, TimeZone};
-use ore_api::consts::TOKEN_DECIMALS;
+use eore_api::consts::TOKEN_DECIMALS;
 
 pub fn amount_u64_to_string(amount: u64) -> String {
     amount_u64_to_f64(amount).to_string()

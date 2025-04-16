@@ -1,17 +1,17 @@
 [package]
-name = "ore-cli"
-version = "3.4.15"
+name = "bitz"
+version = "3.4.24"
 edition = "2021"
 license = "Apache-2.0"
-description = "A command line interface for ORE cryptocurrency mining."
-documentation = "https://ore.supply"
-homepage = "https://ore.supply"
-repository = "https://github.com/regolith-labs/ore-cli"
+description = "A command line interface for BITZ cryptocurrency collecting."
+documentation = "https://powpow.app"
+homepage = "https://powpow.app"
+repository = "https://github.com/needmorebitz/bitz-cli"
 readme = "./README.md"
-keywords = ["solana", "crypto", "mining"]
+keywords = ["solana", "crypto", "collecting"]
 
 [[bin]]
-name = "ore"
+name = "bitz"
 path = "src/main.rs"
 
 [features]
@@ -36,8 +36,8 @@ futures = "0.3.30"
 indicatif = "0.17.8"
 mpl-token-metadata = "5.1"
 num_cpus = "1.16.0"
-ore-api = "3.6.0"
-ore-boost-api = "4.0.0"
+eore-api  = "3.6.2"
+eore-boost-api = "4.0.1"
 ore-pool-api = "1.7.0-beta"
 ore-pool-types = "1.7.0-beta"
 url = "2.5"
@@ -59,6 +59,8 @@ thiserror = "1.0.63"
 tokio = "1.35.1"
 tokio-tungstenite = "0.16"
 tabled = { version = "0.17.0", features = ["ansi"] }
+log = { version = "0.4.20" }
+env_logger = "0.10"
 
 [profile.release]
 opt-level = 3           # Optimize for binary size. You can use "3" for full optimizations if binary size isn't an issue.

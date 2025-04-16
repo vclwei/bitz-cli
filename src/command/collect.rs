@@ -136,22 +136,22 @@ impl Miner {
                 ixs.push(eore_api::sdk::reset(signer.pubkey()));
             }
 
-            // Build mine ix
-            let mine_ix = eore_api::sdk::mine(
+            // Build collect ix
+            let collect_ix = eore_api::sdk::mine(
                 signer.pubkey(),
                 signer.pubkey(),
                 self.find_bus().await,
                 solution,
                 boost_config_address,
             );
-            ixs.push(mine_ix);
+            ixs.push(collect_ix);
 
             // Submit transaction
             match self
                 .send_and_confirm(&ixs, ComputeBudget::Fixed(compute_budget), false)
                 .await
             {
-                Ok(sig) => self.fetch_solo_mine_event(sig, verbose).await,
+                Ok(sig) => self.fetch_solo_collect_event(sig, verbose).await,
                 Err(err) => {
                     let collecting_data = SoloCollectingData::failed();
                     let mut data = self.solo_collecting_data.write().unwrap();
@@ -262,7 +262,7 @@ impl Miner {
                     continue;
                 }
                 Ok(()) => {
-                    self.fetch_pool_mine_event(pool, last_hash_at, verbose)
+                    self.fetch_pool_collect_event(pool, last_hash_at, verbose)
                         .await;
                 }
             }
@@ -352,7 +352,7 @@ impl Miner {
                                         ));
                                     }
                                     if global_best_difficulty.ge(&min_difficulty) {
-                                        // Mine until min difficulty has been met
+                                        // Collect until min difficulty has been met
                                         break;
                                     }
                                 } else if i.id == 0 {
@@ -459,7 +459,7 @@ impl Miner {
         BUS_ADDRESSES[i]
     }
 
-    async fn fetch_solo_mine_event(&self, sig: Signature, verbose: bool) {
+    async fn fetch_solo_collect_event(&self, sig: Signature, verbose: bool) {
         // Add loading row
         let collecting_data = SoloCollectingData::fetching(sig);
         let mut data = self.solo_collecting_data.write().unwrap();
@@ -543,7 +543,7 @@ impl Miner {
         }
     }
 
-    async fn fetch_pool_mine_event(&self, pool: &Pool, last_hash_at: i64, verbose: bool) {
+    async fn fetch_pool_collect_event(&self, pool: &Pool, last_hash_at: i64, verbose: bool) {
         let collecting_data = match pool
             .get_latest_pool_event(self.signer().pubkey(), last_hash_at)
             .await
@@ -642,7 +642,7 @@ impl Miner {
     }
 
     async fn open(&self) {
-        // Register miner
+        // Register collector
         let mut ixs = Vec::new();
         let signer = self.signer();
         let fee_payer = self.fee_payer();
@@ -659,4 +659,4 @@ impl Miner {
                 .ok();
         }
     }
-}
+} 

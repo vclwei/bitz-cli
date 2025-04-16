@@ -1,4 +1,4 @@
-use ore_api::consts::TREASURY_ADDRESS;
+use eore_api::consts::TREASURY_ADDRESS;
 use solana_sdk::signature::Signer;
 
 use crate::{Miner, utils::ComputeBudget};
@@ -11,7 +11,7 @@ impl Miner {
         }
 
         // Submit initialize tx
-        let ix = ore_api::sdk::initialize(self.signer().pubkey());
+        let ix = eore_api::sdk::initialize(self.signer().pubkey());
         let _ = self.send_and_confirm(&[ix], ComputeBudget::Fixed(500_000), false).await.unwrap();
     }
 }

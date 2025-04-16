@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use crossterm::style::Stylize;
 use drillx::Solution;
-use ore_api::state::proof_pda;
+use eore_api::state::proof_pda;
 use ore_pool_api::state::member_pda;
 use ore_pool_types::{
     BalanceUpdate, ContributePayload, Member, MemberChallenge, PoolAddress, RegisterPayload,
@@ -72,10 +72,10 @@ impl Miner {
             // Get proof data
             let proof_address = proof_pda(pool_address).0;
             if let Ok(proof) = get_proof(&self.rpc_client, proof_address).await {
-                point.balance = format!("{} ORE", amount_u64_to_f64(proof.balance));
+                point.balance = format!("{} BITZ", amount_u64_to_f64(proof.balance));
                 point.last_hash_at = format_timestamp(proof.last_hash_at);
                 point.lifetime_hashes = proof.total_hashes.to_string();
-                point.lifetime_rewards = format!("{} ORE", amount_u64_to_f64(proof.total_rewards));
+                point.lifetime_rewards = format!("{} BITZ", amount_u64_to_f64(proof.total_rewards));
             }
 
             // Push data
@@ -135,7 +135,7 @@ impl Miner {
         });
         data.push(TableData {
             key: "Balance".to_string(),
-            value: format!("{} ORE", amount_u64_to_f64(proof.balance)),
+            value: format!("{} BITZ", amount_u64_to_f64(proof.balance)),
         });
         data.push(TableData {
             key: "Last hash".to_string(),
@@ -151,7 +151,7 @@ impl Miner {
         });
         data.push(TableData {
             key: "Lifetime rewards".to_string(),
-            value: format!("{} ORE", amount_u64_to_f64(proof.total_rewards)),
+            value: format!("{} BITZ", amount_u64_to_f64(proof.total_rewards)),
         });
         data.push(TableData {
             key: "Miner".to_string(),
@@ -168,7 +168,7 @@ impl Miner {
             });
             data.push(TableData {
                 key: "Balance".to_string(),
-                value: format!("{} ORE", utils::amount_u64_to_string(member.balance))
+                value: format!("{} BITZ", utils::amount_u64_to_string(member.balance))
                     .bold()
                     .yellow()
                     .to_string(),
@@ -178,12 +178,12 @@ impl Miner {
                 let pending_rewards = (member_offchain.total_balance as u64) - member.total_balance;
                 data.push(TableData {
                     key: "Pending rewards".to_string(),
-                    value: format!("{} ORE", utils::amount_u64_to_string(pending_rewards)),
+                    value: format!("{} BITZ", utils::amount_u64_to_string(pending_rewards)),
                 });
             }
             data.push(TableData {
                 key: "Lifetime rewards".to_string(),
-                value: format!("{} ORE", utils::amount_u64_to_string(member.total_balance)),
+                value: format!("{} BITZ", utils::amount_u64_to_string(member.total_balance)),
             });
         }
 
@@ -199,7 +199,7 @@ impl Miner {
         }
         println!("\n{table}\n");
         if member.is_ok() {
-            println!("Pool operators automatically commit pending rewards to the blockchain at regular intervals. To manually commit your pending rewards now, run the following command:\n\n`ore pool {} commit`\n", pool_url);
+            println!("Pool operators automatically commit pending rewards to the blockchain at regular intervals. To manually commit your pending rewards now, run the following command:\n\n`ore-cli pool {} commit`\n", pool_url);
         }
         Ok(())
     }
@@ -335,7 +335,7 @@ impl Pool {
         let get_url = format!("{}/event/latest/{}", self.pool_url(), authority);
         let mut attempts = 0;
         let progress_bar = Arc::new(spinner::new_progress_bar());
-        progress_bar.set_message(format!("Fetching mining event... (retry {})", attempts));
+        progress_bar.set_message(format!("Fetching collecting event... (retry {})", attempts));
         loop {
             // Parse pool event
             let resp = self.http_client.get(get_url.clone()).send().await?;
@@ -371,7 +371,7 @@ impl Pool {
                 return Err(Error::Internal("Retry limit exceeded".to_string()))
                     .map_err(From::from);
             }
-            progress_bar.set_message(format!("Fetching mining event... (retry {})", attempts));
+            progress_bar.set_message(format!("Fetching collecting event... (retry {})", attempts));
             tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
         }
     }

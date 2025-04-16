@@ -122,12 +122,12 @@ pub struct ClaimArgs {
 pub struct InitializeArgs {}
 
 #[derive(Parser, Debug)]
-pub struct MineArgs {
+pub struct CollectArgs {
     #[arg(
         long,
         short,
         value_name = "CORES_COUNT",
-        help = "The number of CPU cores to allocate to mining.",
+        help = "The number of CPU cores to allocate to collecting.",
         default_value = "1"
     )]
     pub cores: String,
@@ -136,7 +136,7 @@ pub struct MineArgs {
         long,
         short,
         value_name = "SECONDS",
-        help = "The number seconds before the deadline to stop mining and start submitting.",
+        help = "The number seconds before the deadline to stop collecting and start submitting.",
         default_value = "5"
     )]
     pub buffer_time: u64,
@@ -145,7 +145,7 @@ pub struct MineArgs {
         long,
         short,
         value_name = "DEVICE_ID",
-        help = "An optional device id to use for pool mining (max 5 devices per keypair)."
+        help = "An optional device id to use for pool collecting (max 5 devices per keypair)."
     )]
     pub device_id: Option<u64>,
 
@@ -198,7 +198,7 @@ pub struct StakeArgs {
     #[command(subcommand)]
     pub command: Option<StakeCommand>,
 
-    #[arg(value_name = "MINT_ADDRESS", help = "The mint to stake with.")]
+    #[arg(value_name = "MINT_ADDRESS", help = "The mint to stake with. Defaults to BITZ mint when not provided.")]
     pub mint: Option<String>,
 
     #[arg(
@@ -287,7 +287,7 @@ pub struct TransactionArgs {
 
 #[derive(Parser, Debug)]
 pub struct TransferArgs {
-    #[arg(value_name = "AMOUNT", help = "The amount of ORE to transfer.")]
+    #[arg(value_name = "AMOUNT", help = "The amount of BITZ to transfer.")]
     pub amount: f64,
 
     #[arg(
@@ -328,7 +328,7 @@ pub struct UnstakeArgs {
 pub struct UpgradeArgs {
     #[arg(
         value_name = "AMOUNT",
-        help = "The amount of ORE to upgrade from v1 to v2. Defaults to max."
+        help = "The amount of BITZ to upgrade from v1 to v2. Defaults to max."
     )]
     pub amount: Option<f64>,
 }

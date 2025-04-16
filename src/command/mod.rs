@@ -3,7 +3,7 @@ mod benchmark;
 mod claim;
 #[cfg(feature = "admin")]
 mod initialize;
-mod mine;
+mod collect;
 mod pool;
 mod program;
 mod stake;

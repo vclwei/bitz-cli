@@ -1,11 +1,11 @@
 use std::time::Duration;
 
 use colored::Colorize;
-use ore_api::{
+use eore_api::{
     consts::{CONFIG_ADDRESS, TREASURY_ADDRESS},
     state::{proof_pda, Bus, Config, Proof, Treasury},
 };
-use ore_boost_api::state::{Boost, Stake};
+use eore_boost_api::state::{Boost, Stake};
 use ore_pool_api::state::{Member, Pool};
 use serde::Deserialize;
 use solana_account_decoder::UiAccountEncoding;
@@ -107,12 +107,12 @@ pub async fn get_config(client: &RpcClient) -> Config {
     *Config::try_from_bytes(&data).expect("Failed to parse config account")
 }
 
-pub async fn get_boost_config(client: &RpcClient) -> ore_boost_api::state::Config {
+pub async fn get_boost_config(client: &RpcClient) -> eore_boost_api::state::Config {
     let data = client
-        .get_account_data(&ore_boost_api::state::config_pda().0)
+        .get_account_data(&eore_boost_api::state::config_pda().0)
         .await
         .expect("Failed to get config account");
-    *ore_boost_api::state::Config::try_from_bytes(&data).expect("Failed to parse config account")
+    *eore_boost_api::state::Config::try_from_bytes(&data).expect("Failed to parse config account")
 }
 
 pub async fn get_boost(client: &RpcClient, address: Pubkey) -> Result<Boost, anyhow::Error> {
@@ -121,7 +121,7 @@ pub async fn get_boost(client: &RpcClient, address: Pubkey) -> Result<Boost, any
 }
 
 pub async fn get_boosts(client: &RpcClient) -> Result<Vec<(Pubkey, Boost)>, anyhow::Error> {
-    get_program_accounts::<Boost>(client, ore_boost_api::ID, vec![]).await
+    get_program_accounts::<Boost>(client, eore_boost_api::ID, vec![]).await
 }
 
 pub async fn get_pools(client: &RpcClient) -> Result<Vec<(Pubkey, Pool)>, anyhow::Error> {
@@ -153,7 +153,7 @@ pub async fn get_boost_stake_accounts(
     boost_address: Pubkey,
 ) -> Result<Vec<(Pubkey, Stake)>, anyhow::Error> {
     let filter = RpcFilterType::Memcmp(Memcmp::new_base58_encoded(48, &boost_address.to_bytes()));
-    get_program_accounts::<Stake>(rpc_client, ore_boost_api::ID, vec![filter]).await
+    get_program_accounts::<Stake>(rpc_client, eore_boost_api::ID, vec![filter]).await
 }
 
 pub async fn get_proof_with_authority(

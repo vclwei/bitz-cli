@@ -25,7 +25,7 @@ impl TableSectionTitle for Table {
 }
 
 #[derive(Clone, Tabled)]
-pub struct SoloMiningData {
+pub struct SoloCollectingData {
     #[tabled(rename = "Signature")]
     pub signature: String,
     #[tabled(rename = "Block")]
@@ -46,7 +46,7 @@ pub struct SoloMiningData {
     pub status: String,
 }
 
-impl SoloMiningData {
+impl SoloCollectingData {
     pub fn fetching(sig: Signature) -> Self {
         Self {
             signature: sig.to_string(),
@@ -78,7 +78,7 @@ impl SoloMiningData {
 
 
 #[derive(Clone, Tabled)]
-pub struct PoolMiningData {
+pub struct PoolCollectingData {
     #[tabled(rename = "Signature")]
     pub signature: String,
     #[tabled(rename = "Block")]

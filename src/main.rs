@@ -16,7 +16,7 @@ use solana_sdk::{
     commitment_config::CommitmentConfig,
     signature::{read_keypair_file, Keypair},
 };
-use utils::{PoolMiningData, SoloMiningData, Tip};
+use utils::{PoolCollectingData, SoloCollectingData, Tip};
 
 // TODO: Unify balance and proof into "account"
 // TODO: Move balance subcommands to "pool"
@@ -31,10 +31,8 @@ struct Miner {
     pub dynamic_fee: bool,
     pub rpc_client: Arc<RpcClient>,
     pub fee_payer_filepath: Option<String>,
-    pub jito_client: Arc<RpcClient>,
-    pub tip: Arc<std::sync::RwLock<u64>>,
-    pub solo_mining_data: Arc<std::sync::RwLock<Vec<SoloMiningData>>>,
-    pub pool_mining_data: Arc<std::sync::RwLock<Vec<PoolMiningData>>>,
+    pub solo_collecting_data: Arc<std::sync::RwLock<Vec<SoloCollectingData>>>,
+    pub pool_collecting_data: Arc<std::sync::RwLock<Vec<PoolCollectingData>>>,
 }
 
 #[derive(Subcommand, Debug)]
@@ -45,17 +43,17 @@ enum Commands {
     #[command(about = "Benchmark your machine's hashpower")]
     Benchmark(BenchmarkArgs),
 
-    #[command(about = "Claim your mining yield")]
+    #[command(about = "Claim your collecting yield")]
     Claim(ClaimArgs),
 
     #[cfg(feature = "admin")]
     #[command(about = "Initialize the program")]
     Initialize(InitializeArgs),
 
-    #[command(about = "Start mining on your local machine")]
-    Mine(MineArgs),
+    #[command(about = "Start collecting on your local machine")]
+    Collect(CollectArgs),
 
-    #[command(about = "Connect to a mining pool")]
+    #[command(about = "Connect to a collecting pool")]
     Pool(PoolArgs),
 
     #[command(about = "Fetch onchain global program variables")]
@@ -64,10 +62,10 @@ enum Commands {
     #[command(about = "Manage your stake positions")]
     Stake(StakeArgs),
 
-    #[command(about = "Fetch details about an ORE transaction")]
+    #[command(about = "Fetch details about a BITZ transaction")]
     Transaction(TransactionArgs),
 
-    #[command(about = "Send ORE to another user")]
+    #[command(about = "Send BITZ to another user")]
     Transfer(TransferArgs),
 }
 
@@ -111,7 +109,7 @@ struct Args {
         long,
         value_name = "MICROLAMPORTS",
         help = "Price to pay for compute units. If dynamic fees are enabled, this value will be used as the cap.",
-        default_value = "100000",
+        default_value = "1000",
         global = true
     )]
     priority_fee: Option<u64>,
@@ -127,20 +125,15 @@ struct Args {
     #[arg(long, help = "Enable dynamic priority fees", global = true)]
     dynamic_fee: bool,
 
-    #[arg(
-        long,
-        value_name = "JITO",
-        help = "Add jito tip to the miner. Defaults to false.",
-        global = true
-    )]
-    jito: bool,
-
     #[command(subcommand)]
     command: Commands,
 }
 
 #[tokio::main]
 async fn main() {
+    // Initialize logger
+    env_logger::init_from_env(env_logger::Env::default().default_filter_or("info"));
+    
     let args = Args::parse();
 
     // Load the config file from custom path, the default path, or use default config values
@@ -160,32 +153,9 @@ async fn main() {
     let default_keypair = args.keypair.unwrap_or(cli_config.keypair_path.clone());
     let fee_payer_filepath = args.fee_payer.unwrap_or(default_keypair.clone());
     let rpc_client = RpcClient::new_with_commitment(cluster, CommitmentConfig::confirmed());
-    let jito_client =
-        RpcClient::new("https://mainnet.block-engine.jito.wtf/api/v1/transactions".to_string());
 
-    let tip = Arc::new(RwLock::new(0_u64));
-    let tip_clone = Arc::clone(&tip);
-    let solo_mining_data = Arc::new(RwLock::new(Vec::new()));
-    let pool_mining_data = Arc::new(RwLock::new(Vec::new()));
-
-    if args.jito {
-        let url = "ws://bundles-api-rest.jito.wtf/api/v1/bundles/tip_stream";
-        let (ws_stream, _) = connect_async(url).await.unwrap();
-        let (_, mut read) = ws_stream.split();
-
-        tokio::spawn(async move {
-            while let Some(message) = read.next().await {
-                if let Ok(Message::Text(text)) = message {
-                    if let Ok(tips) = serde_json::from_str::<Vec<Tip>>(&text) {
-                        for item in tips {
-                            let mut tip = tip_clone.write().unwrap();
-                            *tip = (item.landed_tips_50th_percentile * (10_f64).powf(9.0)) as u64;
-                        }
-                    }
-                }
-            }
-        });
-    }
+    let solo_collecting_data = Arc::new(RwLock::new(Vec::new()));
+    let pool_collecting_data = Arc::new(RwLock::new(Vec::new()));
 
     let miner = Arc::new(Miner::new(
         Arc::new(rpc_client),
@@ -194,10 +164,8 @@ async fn main() {
         args.dynamic_fee_url,
         args.dynamic_fee,
         Some(fee_payer_filepath),
-        Arc::new(jito_client),
-        tip,
-        solo_mining_data,
-        pool_mining_data,
+        solo_collecting_data,
+        pool_collecting_data,
     ));
 
     // Execute user command.
@@ -219,8 +187,8 @@ async fn main() {
         Commands::Program(_) => {
             miner.program().await;
         }
-        Commands::Mine(args) => {
-            if let Err(err) = miner.mine(args).await {
+        Commands::Collect(args) => {
+            if let Err(err) = miner.collect(args).await {
                 println!("{:?}", err);
             }
         }
@@ -248,10 +216,8 @@ impl Miner {
         dynamic_fee_url: Option<String>,
         dynamic_fee: bool,
         fee_payer_filepath: Option<String>,
-        jito_client: Arc<RpcClient>,
-        tip: Arc<std::sync::RwLock<u64>>,
-        solo_mining_data: Arc<std::sync::RwLock<Vec<SoloMiningData>>>,
-        pool_mining_data: Arc<std::sync::RwLock<Vec<PoolMiningData>>>,
+        solo_collecting_data: Arc<std::sync::RwLock<Vec<SoloCollectingData>>>,
+        pool_collecting_data: Arc<std::sync::RwLock<Vec<PoolCollectingData>>>,
     ) -> Self {
         Self {
             rpc_client,
@@ -260,10 +226,8 @@ impl Miner {
             dynamic_fee_url,
             dynamic_fee,
             fee_payer_filepath,
-            jito_client,
-            tip,
-            solo_mining_data,
-            pool_mining_data,
+            solo_collecting_data,
+            pool_collecting_data,
         }
     }
 

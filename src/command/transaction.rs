@@ -2,7 +2,7 @@ use std::str::FromStr;
 
 use b64::FromBase64;
 use colored::Colorize;
-use ore_api::event::MineEvent;
+use eore_api::event::MineEvent;
 use solana_sdk::signature::Signature;
 use solana_transaction_status::{option_serializer::OptionSerializer, UiTransactionEncoding};
 use tabled::{settings::{object::{Columns, Rows}, Alignment, Remove, Style}, Table};
@@ -21,7 +21,7 @@ impl Miner {
                 if let Some(meta) = tx.transaction.meta {
                     if let OptionSerializer::Some(log_messages) = meta.log_messages {
                         if let Some(return_log) = log_messages.iter().find(|log| log.starts_with("Program return: ")) {
-                            if let Some(return_data) = return_log.strip_prefix(&format!("Program return: {} ", ore_api::ID)) {
+                            if let Some(return_data) = return_log.strip_prefix(&format!("Program return: {} ", eore_api::ID)) {
                                 if let Ok(return_data) = return_data.from_base64() {
                                     let event = MineEvent::from_bytes(&return_data);
                                     data.push(TableData {

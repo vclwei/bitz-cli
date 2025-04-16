@@ -1,8 +1,8 @@
 use std::str::FromStr;
 
 use colored::*;
-use ore_api::state::Proof;
-use ore_boost_api::state::{boost_pda, stake_pda, Boost, Config as BoostConfig, Stake};
+use eore_api::state::Proof;
+use eore_boost_api::state::{boost_pda, stake_pda, Boost, Config as BoostConfig, Stake};
 use solana_program::{program_pack::Pack, pubkey::Pubkey};
 use solana_sdk::signature::Signer;
 use spl_token::{amount_to_ui_amount, state::Mint};
@@ -56,10 +56,34 @@ impl Miner {
     ) -> Result<(), Error> {
         let signer = self.signer();
         let pubkey = signer.pubkey();
-        let mint_str = stake_args.mint.expect("Mint address is required");
-        let mint_address = Pubkey::from_str(&mint_str).expect("Failed to parse mint address");
+        let mint_address = match stake_args.mint {
+            Some(mint_str) => Pubkey::from_str(&mint_str).expect("Failed to parse mint address"),
+            None => eore_api::consts::MINT_ADDRESS,
+        };
         let boost_address = boost_pda(mint_address).0;
         let stake_address = stake_pda(pubkey, boost_address).0;
+
+        // Check if boost account exists
+        match get_boost(&self.rpc_client, boost_address).await {
+            Ok(_) => {},
+            Err(err) => {
+                println!("{}: No boost account found for this mint.", "ERROR".bold().red());
+                println!("Make sure you are using a valid mint address that has an associated boost account.");
+                println!("Error details: {}", err);
+                return Err(Error::Internal("Boost account not found".to_string()));
+            }
+        };
+        
+        // Check if stake account exists
+        let stake = match get_stake(&self.rpc_client, stake_address).await {
+            Ok(stake) => stake,
+            Err(err) => {
+                println!("{}: No stake account found for this mint.", "ERROR".bold().red());
+                println!("You may need to deposit funds first before claiming rewards.");
+                println!("Error details: {}", err);
+                return Err(Error::Internal("Stake account not found".to_string()));
+            }
+        };
 
         let mut ixs = vec![];
         let beneficiary = match claim_args.to {
@@ -68,7 +92,7 @@ impl Miner {
                 let wallet = Pubkey::from_str(&to).expect("Failed to parse wallet address");
                 let beneficiary_tokens = spl_associated_token_account::get_associated_token_address(
                     &wallet,
-                    &ore_api::consts::MINT_ADDRESS,
+                    &eore_api::consts::MINT_ADDRESS,
                 );
                 if self
                     .rpc_client
@@ -80,7 +104,7 @@ impl Miner {
                         spl_associated_token_account::instruction::create_associated_token_account(
                             &pubkey,
                             &wallet,
-                            &ore_api::consts::MINT_ADDRESS,
+                            &eore_api::consts::MINT_ADDRESS,
                             &spl_token::id(),
                         ),
                     );
@@ -89,13 +113,8 @@ impl Miner {
             }
         };
 
-        // Get stake account data to check rewards balance
-        let stake = get_stake(&self.rpc_client, stake_address)
-            .await
-            .expect("Failed to fetch stake account");
-
         // Build claim instruction with amount or max rewards
-        ixs.push(ore_boost_api::sdk::claim(
+        ixs.push(eore_boost_api::sdk::claim(
             pubkey,
             beneficiary,
             mint_address,
@@ -124,12 +143,26 @@ impl Miner {
             self.signer().pubkey()
         };
         let stake_address = stake_pda(authority, boost_address).0;
-        let boost = get_boost(&self.rpc_client, boost_address)
-            .await
-            .expect("Failed to fetch boost account");
-        let mint = get_mint(&self.rpc_client, mint_address)
-            .await
-            .expect("Failed to fetch mint account");
+        
+        // Check if boost account exists
+        let boost = match get_boost(&self.rpc_client, boost_address).await {
+            Ok(boost) => boost,
+            Err(err) => {
+                println!("{}: No boost account found for this mint.", "ERROR".bold().red());
+                println!("Make sure you are using a valid mint address that has an associated boost account.");
+                println!("Error details: {}", err);
+                return Err(Error::Internal("Boost account not found".to_string()));
+            }
+        };
+        
+        let mint = match get_mint(&self.rpc_client, mint_address).await {
+            Ok(mint) => mint,
+            Err(err) => {
+                println!("{}: Failed to fetch mint account.", "ERROR".bold().red());
+                println!("Error details: {}", err);
+                return Err(Error::Internal("Mint account not found".to_string()));
+            }
+        };
         let metadata_address = mpl_token_metadata::accounts::Metadata::find_pda(&mint_address).0;
         let symbol = match self.rpc_client.get_account_data(&metadata_address).await {
             Ok(metadata_data) => {
@@ -172,7 +205,7 @@ impl Miner {
         symbol: String,
         data: &mut Vec<TableData>,
     ) {
-        let boost_config_address = ore_boost_api::state::config_pda().0;
+        let boost_config_address = eore_boost_api::state::config_pda().0;
         let stake = get_stake(&self.rpc_client, address).await;
         let boost_config = get_boost_config(&self.rpc_client).await;
         let boost_proof = get_proof_with_authority(&self.rpc_client, boost_config_address)
@@ -209,12 +242,12 @@ impl Miner {
             data.push(TableData {
                 key: "Yield".to_string(),
                 value: if claimable_yield > 0 {
-                    format!("{} ORE", amount_u64_to_f64(claimable_yield))
-                        .yellow()
+                    format!("{} BITZ", amount_u64_to_f64(claimable_yield))
                         .bold()
+                        .yellow()
                         .to_string()
                 } else {
-                    format!("{} ORE", amount_u64_to_f64(claimable_yield))
+                    format!("{} BITZ", amount_u64_to_f64(claimable_yield))
                 },
             });
         } else {
@@ -272,7 +305,7 @@ impl Miner {
             None => self.signer().pubkey(),
         };
 
-        let boost_config_address = ore_boost_api::state::config_pda().0;
+        let boost_config_address = eore_boost_api::state::config_pda().0;
         let boost_config = get_boost_config(&self.rpc_client).await;
         let boost_proof = get_proof_with_authority(&self.rpc_client, boost_config_address)
             .await
@@ -334,12 +367,12 @@ impl Miner {
                     "NaN".to_string()
                 },
                 my_yield: if stake_rewards > 0 {
-                    format!("{} ORE", amount_u64_to_f64(stake_rewards))
-                        .yellow()
+                    format!("{} BITZ", amount_u64_to_f64(stake_rewards))
                         .bold()
+                        .yellow()
                         .to_string()
                 } else {
-                    format!("{} ORE", amount_u64_to_f64(stake_rewards))
+                    format!("{} BITZ", amount_u64_to_f64(stake_rewards))
                 },
             });
         }
@@ -362,72 +395,139 @@ impl Miner {
         args: StakeDepositArgs,
         stake_args: StakeArgs,
     ) -> Result<(), Error> {
+        println!("Starting stake deposit process...");
+
         // Parse mint address
-        let mint_str = stake_args.mint.expect("Mint address is required");
-        let mint_address = Pubkey::from_str(&mint_str).expect("Failed to parse mint address");
+        let mint_address = match stake_args.mint {
+            Some(mint_str) => {
+                println!("Using provided mint address: {}", mint_str);
+                Pubkey::from_str(&mint_str).expect("Failed to parse mint address")
+            }
+            None => {
+                println!("No mint provided, using default MINT_ADDRESS {}", eore_api::consts::MINT_ADDRESS);
+                eore_api::consts::MINT_ADDRESS
+            }
+        };
 
         // Get signer
         let signer = self.signer();
+        println!("Signer pubkey: {}", signer.pubkey());
+
+        // Get sender token account
         let sender = match &args.token_account {
             Some(address) => {
+                println!("Using provided token account: {}", address);
                 Pubkey::from_str(&address).expect("Failed to parse token account address")
             }
-            None => spl_associated_token_account::get_associated_token_address(
-                &signer.pubkey(),
-                &mint_address,
-            ),
+            None => {
+                let ata = spl_associated_token_account::get_associated_token_address(
+                    &signer.pubkey(),
+                    &mint_address,
+                );
+                println!("Using derived ATA address: {}", ata);
+                ata
+            }
         };
 
-        // Get token account
-        let mint_data = self
-            .rpc_client
-            .get_account_data(&mint_address)
-            .await
-            .expect("Failed to fetch mint account");
-        let mint = Mint::unpack(&mint_data).expect("Failed to parse mint account");
-        let token_account = self
-            .rpc_client
-            .get_token_account(&sender)
-            .await
-            .expect("Failed to fetch token account")
-            .expect("Token account not found");
+        // Get token account and mint info
+        println!("Fetching mint account data...");
+        let mint_data = match self.rpc_client.get_account_data(&mint_address).await {
+            Ok(data) => data,
+            Err(err) => {
+                println!("ERROR: Failed to fetch mint account data: {}", err);
+                return Err(Error::Internal("Failed to fetch mint account".to_string()));
+            }
+        };
+        
+        let mint = match Mint::unpack(&mint_data) {
+            Ok(mint) => {
+                println!("Successfully unpacked mint data. Decimals: {}", mint.decimals);
+                mint
+            }
+            Err(err) => {
+                println!("ERROR: Failed to unpack mint data: {}", err);
+                return Err(Error::Internal("Failed to parse mint account".to_string()));
+            }
+        };
+
+        println!("Fetching token account...");
+        let token_account = match self.rpc_client.get_token_account(&sender).await {
+            Ok(Some(account)) => {
+                println!("Found token account with balance: {}", account.token_amount.amount);
+                account
+            }
+            Ok(None) => {
+                println!("ERROR: Token account not found");
+                return Err(Error::Internal("Token account not found".to_string()));
+            }
+            Err(err) => {
+                println!("ERROR: Failed to fetch token account: {}", err);
+                return Err(Error::Internal("Failed to fetch token account".to_string()));
+            }
+        };
 
         // Parse amount
         let amount: u64 = if let Some(amount) = args.amount {
-            (amount * 10f64.powf(mint.decimals as f64)) as u64
+            let calculated = (amount * 10f64.powf(mint.decimals as f64)) as u64;
+            println!("Using provided amount: {} (raw: {})", amount, calculated);
+            calculated
         } else {
-            u64::from_str(token_account.token_amount.amount.as_str())
-                .expect("Failed to parse token balance")
+            let balance = u64::from_str(token_account.token_amount.amount.as_str())
+                .expect("Failed to parse token balance");
+            println!("Using full balance amount: {}", balance);
+            balance
         };
 
         // Get addresses
         let boost_address = boost_pda(mint_address).0;
+        println!("Derived boost PDA: {}", boost_address);
+        
         let stake_address = stake_pda(signer.pubkey(), boost_address).0;
-        let _boost = get_boost(&self.rpc_client, boost_address)
-            .await
-            .expect("Failed to fetch boost account");
+        println!("Derived stake PDA: {}", stake_address);
 
-        // Open stake account, if needed
-        if self
-            .rpc_client
-            .get_account_data(&stake_address)
-            .await
-            .is_err()
-        {
-            println!("Initializing stake account...");
-            let ix = ore_boost_api::sdk::open(signer.pubkey(), signer.pubkey(), mint_address);
-            self.send_and_confirm(&[ix], ComputeBudget::Fixed(50_000), false)
-                .await
-                .ok();
+        // Check if boost account exists
+        println!("Checking boost account...");
+        let boost = match get_boost(&self.rpc_client, boost_address).await {
+            Ok(boost) => {
+                println!("Found boost account with weight: {}", boost.weight);
+                boost
+            }
+            Err(err) => {
+                println!("ERROR: No boost account found for mint {}", mint_address);
+                println!("Error details: {}", err);
+                return Err(Error::Internal("Boost account not found".to_string()));
+            }
+        };
+
+        // Check and initialize stake account if needed
+        println!("Checking if stake account needs initialization...");
+        if self.rpc_client.get_account_data(&stake_address).await.is_err() {
+            println!("Stake account not found, initializing...");
+            let ix = eore_boost_api::sdk::open(signer.pubkey(), signer.pubkey(), mint_address);
+            match self.send_and_confirm(&[ix], ComputeBudget::Fixed(50_000), false).await {
+                Ok(_) => println!("Successfully initialized stake account"),
+                Err(err) => {
+                    println!("ERROR: Failed to initialize stake account: {}", err);
+                    return Err(Error::Internal("Failed to initialize stake account".to_string()));
+                }
+            }
+        } else {
+            println!("Stake account already exists");
         }
 
-        // Send tx
-        println!("Depositing stake...");
-        let ix = ore_boost_api::sdk::deposit(signer.pubkey(), mint_address, amount);
-        self.send_and_confirm(&[ix], ComputeBudget::Fixed(200_000), false)
-            .await
-            .ok();
-        Ok(())
+        // Send deposit transaction
+        println!("Sending deposit transaction...");
+        let ix = eore_boost_api::sdk::deposit(signer.pubkey(), mint_address, amount);
+        match self.send_and_confirm(&[ix], ComputeBudget::Fixed(50_000), false).await {
+            Ok(_) => {
+                println!("Successfully deposited {} tokens", amount);
+                Ok(())
+            }
+            Err(err) => {
+                println!("ERROR: Failed to deposit tokens: {}", err);
+                Err(Error::Internal("Failed to deposit tokens".to_string()))
+            }
+        }
     }
 
     async fn stake_withdraw(
@@ -436,8 +536,10 @@ impl Miner {
         stake_args: StakeArgs,
     ) -> Result<(), Error> {
         // Parse mint address
-        let mint_str = stake_args.mint.expect("Mint address is required");
-        let mint_address = Pubkey::from_str(&mint_str).expect("Failed to parse mint address");
+        let mint_address = match stake_args.mint {
+            Some(mint_str) => Pubkey::from_str(&mint_str).expect("Failed to parse mint address"),
+            None => eore_api::consts::MINT_ADDRESS,
+        };
 
         // Get signer
         let signer = self.signer();
@@ -482,12 +584,28 @@ impl Miner {
         // Get addresses
         let boost_address = boost_pda(mint_address).0;
         let stake_address = stake_pda(signer.pubkey(), boost_address).0;
-        let _boost = get_boost(&self.rpc_client, boost_address)
-            .await
-            .expect("Failed to fetch boost account");
-        let stake = get_stake(&self.rpc_client, stake_address)
-            .await
-            .expect("Failed to fetch stake account");
+        
+        // Check if boost account exists
+        let _boost = match get_boost(&self.rpc_client, boost_address).await {
+            Ok(boost) => boost,
+            Err(err) => {
+                println!("{}: No boost account found for this mint.", "ERROR".bold().red());
+                println!("Make sure you are using a valid mint address that has an associated boost account.");
+                println!("Error details: {}", err);
+                return Err(Error::Internal("Boost account not found".to_string()));
+            }
+        };
+        
+        // Check if stake account exists
+        let stake = match get_stake(&self.rpc_client, stake_address).await {
+            Ok(stake) => stake,
+            Err(err) => {
+                println!("{}: No stake account found for this mint.", "ERROR".bold().red());
+                println!("You may need to deposit funds first before withdrawing.");
+                println!("Error details: {}", err);
+                return Err(Error::Internal("Stake account not found".to_string()));
+            }
+        };
 
         // Parse amount
         let amount: u64 = if let Some(amount) = args.amount {
@@ -497,7 +615,7 @@ impl Miner {
         };
 
         // Send tx
-        ixs.push(ore_boost_api::sdk::withdraw(
+        ixs.push(eore_boost_api::sdk::withdraw(
             signer.pubkey(),
             mint_address,
             amount,
@@ -514,15 +632,32 @@ impl Miner {
         _args: StakeAccountsArgs,
         stake_args: StakeArgs,
     ) -> Result<(), Error> {
-        let mint_str = stake_args.mint.expect("Mint address is required");
-        let mint_address = Pubkey::from_str(&mint_str).expect("Failed to parse mint address");
+        let mint_address = match stake_args.mint {
+            Some(mint_str) => Pubkey::from_str(&mint_str).expect("Failed to parse mint address"),
+            None => eore_api::consts::MINT_ADDRESS,
+        };
         let boost_address = boost_pda(mint_address).0;
-        let boost = get_boost(&self.rpc_client, boost_address)
-            .await
-            .expect("Failed to fetch boost account");
-        let mint_account = get_mint(&self.rpc_client, mint_address)
-            .await
-            .expect("Failed to fetch mint account");
+        
+        // Check if boost account exists
+        let boost = match get_boost(&self.rpc_client, boost_address).await {
+            Ok(boost) => boost,
+            Err(err) => {
+                println!("{}: No boost account found for this mint.", "ERROR".bold().red());
+                println!("Make sure you are using a valid mint address that has an associated boost account.");
+                println!("Error details: {}", err);
+                return Err(Error::Internal("Boost account not found".to_string()));
+            }
+        };
+        
+        let mint_account = match get_mint(&self.rpc_client, mint_address).await {
+            Ok(mint) => mint,
+            Err(err) => {
+                println!("{}: Failed to fetch mint account.", "ERROR".bold().red());
+                println!("Error details: {}", err);
+                return Err(Error::Internal("Mint account not found".to_string()));
+            }
+        };
+        
         let mut stake_accounts = get_boost_stake_accounts(&self.rpc_client, boost_address)
             .await
             .expect("Failed to fetch stake accounts");
@@ -545,8 +680,8 @@ impl Miner {
                     "NaN".to_string()
                 },
                 rewards: format!(
-                    "{:#.11} ORE",
-                    amount_to_ui_amount(stake.rewards, ore_api::consts::TOKEN_DECIMALS)
+                    "{:#.11} BITZ",
+                    amount_to_ui_amount(stake.rewards, eore_api::consts::TOKEN_DECIMALS)
                 ),
             });
         }

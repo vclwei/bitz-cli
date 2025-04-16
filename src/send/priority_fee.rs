@@ -1,6 +1,6 @@
 use crate::Miner;
 
-use ore_api::consts::BUS_ADDRESSES;
+use eore_api::consts::BUS_ADDRESSES;
 use reqwest::Client;
 use serde_json::{json, Value};
 
@@ -46,7 +46,7 @@ impl Miner {
 
         // Build fee estimate request
         let client = Client::new();
-        let ore_addresses: Vec<String> = std::iter::once(ore_api::ID.to_string())
+        let ore_addresses: Vec<String> = std::iter::once(eore_api::ID.to_string())
             .chain(BUS_ADDRESSES.iter().map(|pubkey| pubkey.to_string()))
             .collect();
         let body = match strategy {
@@ -74,7 +74,7 @@ impl Miner {
                 "id": "1",
                 "method": "qn_estimatePriorityFees",
                 "params": {
-                    "account": "oreV2ZymfyeXgNgBdqMkumTqqAprVqgBWQfoYkrtKWQ",
+                    "account": "EorefDWqzJK31vLxaqkDGsx3CRKqPVpWfuJL7qBQMZYd",
                     "last_n_blocks": 100
                 }
             })),
@@ -167,7 +167,7 @@ impl Miner {
     pub async fn local_dynamic_fee(&self) -> Result<u64, Box<dyn std::error::Error>> {
         let client = self.rpc_client.clone();
         let pubkey = [
-            "oreV2ZymfyeXgNgBdqMkumTqqAprVqgBWQfoYkrtKWQ",
+            "EorefDWqzJK31vLxaqkDGsx3CRKqPVpWfuJL7qBQMZYd",
             "5HngGmYzvSuh3XyU11brHDpMTHXQQRQQT4udGFtQSjgR",
             "2oLNTQKRb4a2117kFi6BYTUDu3RPrMVAHFhCfPKMosxX",
         ];

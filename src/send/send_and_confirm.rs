@@ -1,9 +1,9 @@
 use std::{str::FromStr, time::Duration};
 
 use colored::*;
+use eore_api::error::OreError;
 use indicatif::ProgressBar;
-use ore_api::error::OreError;
-use rand::seq::SliceRandom;
+use log::{debug, error, info, warn};
 use solana_client::{
     client_error::{ClientError, ClientErrorKind, Result as ClientResult},
     rpc_config::RpcSendTransactionConfig,
@@ -12,7 +12,6 @@ use solana_program::{
     instruction::Instruction,
     native_token::{lamports_to_sol, sol_to_lamports},
     pubkey::Pubkey,
-    system_instruction::transfer,
 };
 use solana_rpc_client::spinner;
 use solana_sdk::{
@@ -26,7 +25,7 @@ use solana_transaction_status::{TransactionConfirmationStatus, UiTransactionEnco
 use crate::utils::{get_latest_blockhash_with_retries, ComputeBudget};
 use crate::Miner;
 
-const MIN_SOL_BALANCE: f64 = 0.005;
+const MIN_ETH_BALANCE: f64 = 0.0005;
 
 const RPC_RETRIES: usize = 0;
 const _SIMULATION_RETRIES: usize = 4;
@@ -43,11 +42,16 @@ impl Miner {
         compute_budget: ComputeBudget,
         skip_confirm: bool,
     ) -> ClientResult<Signature> {
+        debug!("Starting send_and_confirm with {} instructions", ixs.len());
+
         let progress_bar = spinner::new_progress_bar();
         let signer = self.signer();
         let client = self.rpc_client.clone();
         let fee_payer = self.fee_payer();
-        let mut send_client = self.rpc_client.clone();
+
+        debug!("Using signer: {}", signer.pubkey());
+        debug!("Using fee payer: {}", fee_payer.pubkey());
+        debug!("RPC client URL: {}", client.url());
 
         // Return error, if balance is zero
         self.check_balance().await;
@@ -56,52 +60,56 @@ impl Miner {
         let mut final_ixs = vec![];
         match compute_budget {
             ComputeBudget::Dynamic => {
+                debug!("Using dynamic compute budget");
                 todo!("simulate tx")
             }
             ComputeBudget::Fixed(cus) => {
+                debug!("Using fixed compute budget: {} CUs", cus);
                 final_ixs.push(ComputeBudgetInstruction::set_compute_unit_limit(cus))
             }
         }
 
         // Set compute unit price
+        let priority_fee = self.priority_fee.unwrap_or(0);
+        debug!("Setting compute unit price: {} microlamports", priority_fee);
         final_ixs.push(ComputeBudgetInstruction::set_compute_unit_price(
-            self.priority_fee.unwrap_or(0),
+            priority_fee,
         ));
 
         // Add in user instructions
+        debug!("Adding {} user instructions", ixs.len());
+
+        // Log program addresses for original instructions
+        for (i, ix) in ixs.iter().enumerate() {
+            info!(
+                "Original Instruction #{}: Program ID = {}",
+                i, ix.program_id
+            );
+            debug!(
+                "  - Accounts: {:?}",
+                ix.accounts
+                    .iter()
+                    .map(|a| a.pubkey.to_string())
+                    .collect::<Vec<_>>()
+            );
+        }
+
         final_ixs.extend_from_slice(ixs);
 
-        // Add jito tip
-        let jito_tip = *self.tip.read().unwrap();
-        if jito_tip > 0 {
-            send_client = self.jito_client.clone();
-        }
-        if jito_tip > 0 {
-            let tip_accounts = [
-                "96gYZGLnJYVFmbjzopPSU6QiEV5fGqZNyN9nmNhvrZU5",
-                "HFqU5x63VTqvQss8hp11i4wVV8bD44PvwucfZ2bU7gRe",
-                "Cw8CFyM9FkoMi7K7Crf6HNQqf4uEMzpKw6QNghXLvLkY",
-                "ADaUMid9yfUytqMBgopwjb2DTLSokTSzL1zt6iGPaS49",
-                "DfXygSm4jCyNCybVYYK6DwvWqjKee8pbDmJGcLWNDXjh",
-                "ADuUkR4vqLUMWXxW9gh6D6L8pMSawimctcNZ5pGwDcEt",
-                "DttWaMuVvTiduZRnguLF7jNxTgiMBZ1hyAumKUiL2KRL",
-                "3AVi9Tg9Uo68tJfuvoKvqKNWKkC5wPdSSdeBnizKZ6jT",
-            ];
-            final_ixs.push(transfer(
-                &signer.pubkey(),
-                &Pubkey::from_str(
-                    &tip_accounts
-                        .choose(&mut rand::thread_rng())
-                        .unwrap()
-                        .to_string(),
-                )
-                .unwrap(),
-                jito_tip,
-            ));
-            progress_bar.println(format!("  Jito tip: {} SOL", lamports_to_sol(jito_tip)));
+        // Log all final instructions including compute budget instructions
+        for (i, ix) in final_ixs.iter().enumerate() {
+            info!("Final Instruction #{}: Program ID = {}", i, ix.program_id);
+            debug!(
+                "  - Accounts: {:?}",
+                ix.accounts
+                    .iter()
+                    .map(|a| a.pubkey.to_string())
+                    .collect::<Vec<_>>()
+            );
         }
 
         // Build tx
+        debug!("Building transaction with config: skip_preflight=true, commitment=Confirmed");
         let send_cfg = RpcSendTransactionConfig {
             skip_preflight: true,
             preflight_commitment: Some(CommitmentLevel::Confirmed),
@@ -114,19 +122,28 @@ impl Miner {
         // Submit tx
         let mut attempts = 0;
         loop {
+            debug!("Transaction attempt #{}", attempts);
             progress_bar.set_message(format!("Submitting transaction... (attempt {})", attempts,));
 
             // Sign tx with a new blockhash (after approximately ~45 sec)
             if attempts % 10 == 0 {
+                debug!(
+                    "Refreshing blockhash and recomputing fees (attempt {})",
+                    attempts
+                );
+
                 // Reset the compute unit price
                 if self.dynamic_fee {
+                    debug!("Computing dynamic priority fee");
                     let fee = match self.get_dynamic_priority_fee().await {
                         Ok(fee) => {
+                            debug!("Dynamic priority fee computed: {} microlamports", fee);
                             progress_bar.println(format!("  Priority fee: {} microlamports", fee));
                             fee
                         }
                         Err(err) => {
                             let fee = self.priority_fee.unwrap_or(0);
+                            warn!("Failed to get dynamic fee: {}. Falling back to static value: {} microlamports", err, fee);
                             log_warning(
                                 &progress_bar,
                                 &format!(
@@ -144,35 +161,47 @@ impl Miner {
                 }
 
                 // Resign the tx
-                let (hash, _slot) = get_latest_blockhash_with_retries(&client).await?;
+                debug!("Getting latest blockhash");
+                let (hash, slot) = get_latest_blockhash_with_retries(&client).await?;
+                debug!("Got blockhash {} at slot {}", hash, slot);
+
                 if signer.pubkey() == fee_payer.pubkey() {
+                    debug!("Signing transaction with single signer");
                     tx.sign(&[&signer], hash);
                 } else {
+                    debug!("Signing transaction with both signer and fee payer");
                     tx.sign(&[&signer, &fee_payer], hash);
                 }
             }
 
             // Send transaction
             attempts += 1;
-            match send_client
-                .send_transaction_with_config(&tx, send_cfg)
-                .await
-            {
+            debug!("Sending transaction to RPC");
+            match client.send_and_confirm_transaction(&tx).await {
                 Ok(sig) => {
+                    debug!("Transaction sent successfully: {}", sig);
+
                     // Skip confirmation
                     if skip_confirm {
+                        debug!("Skipping confirmation as requested");
                         progress_bar.finish_with_message(format!("Sent: {}", sig));
                         return Ok(sig);
                     }
 
                     // Confirm transaction
-                    'confirm: for _ in 0..CONFIRM_RETRIES {
+                    'confirm: for confirm_attempt in 0..CONFIRM_RETRIES {
+                        debug!(
+                            "Confirmation attempt #{} for signature {}",
+                            confirm_attempt, sig
+                        );
                         tokio::time::sleep(Duration::from_millis(CONFIRM_DELAY)).await;
                         match client.get_signature_statuses(&[sig]).await {
                             Ok(signature_statuses) => {
+                                debug!("Got signature statuses: {:?}", signature_statuses);
                                 for status in signature_statuses.value {
                                     if let Some(status) = status {
                                         if let Some(err) = status.err {
+                                            debug!("Transaction error: {:?}", err);
                                             match err {
                                                 // Instruction error
                                                 solana_sdk::transaction::TransactionError::InstructionError(_, err) => {
@@ -181,11 +210,13 @@ impl Miner {
                                                         solana_program::instruction::InstructionError::Custom(err_code) => {
                                                             match err_code {
                                                                 e if e == OreError::NeedsReset as u32 => {
+                                                                    debug!("Needs reset error, retrying transaction");
                                                                     attempts = 0;
                                                                     log_error(&progress_bar, "Needs reset. Retrying...", false);
                                                                     break 'confirm;
                                                                 },
                                                                 _ => {
+                                                                    error!("Custom instruction error: {}", err);
                                                                     log_error(&progress_bar, &err.to_string(), true);
                                                                     return Err(ClientError {
                                                                         request: None,
@@ -197,6 +228,7 @@ impl Miner {
 
                                                         // Non custom instruction error, return
                                                         _ => {
+                                                            error!("Non-custom instruction error: {}", err);
                                                             log_error(&progress_bar, &err.to_string(), true);
                                                             return Err(ClientError {
                                                                 request: None,
@@ -208,6 +240,7 @@ impl Miner {
 
                                                 // Non instruction error, return
                                                 _ => {
+                                                    error!("Non-instruction error: {}", err);
                                                     log_error(&progress_bar, &err.to_string(), true);
                                                     return Err(ClientError {
                                                         request: None,
@@ -218,10 +251,19 @@ impl Miner {
                                         } else if let Some(confirmation) =
                                             status.confirmation_status
                                         {
+                                            debug!(
+                                                "Transaction confirmation status: {:?}",
+                                                confirmation
+                                            );
                                             match confirmation {
-                                                TransactionConfirmationStatus::Processed => {}
+                                                TransactionConfirmationStatus::Processed => {
+                                                    debug!(
+                                                        "Transaction processed but not confirmed"
+                                                    );
+                                                }
                                                 TransactionConfirmationStatus::Confirmed
                                                 | TransactionConfirmationStatus::Finalized => {
+                                                    debug!("Transaction confirmed/finalized");
                                                     progress_bar.finish_with_message(format!(
                                                         "{} {}",
                                                         "OK".bold().green(),
@@ -237,6 +279,7 @@ impl Miner {
 
                             // Handle confirmation errors
                             Err(err) => {
+                                warn!("Error getting signature status: {}", err);
                                 log_error(&progress_bar, &err.kind().to_string(), false);
                             }
                         }
@@ -245,95 +288,33 @@ impl Miner {
 
                 // Handle submit errors
                 Err(err) => {
+                    error!("Error submitting transaction: {}", err);
                     log_error(&progress_bar, &err.kind().to_string(), false);
                 }
-            }
-
-            // Retry
-            tokio::time::sleep(Duration::from_millis(GATEWAY_DELAY)).await;
-            if attempts > GATEWAY_RETRIES {
-                log_error(&progress_bar, "Max retries", true);
-                return Err(ClientError {
-                    request: None,
-                    kind: ClientErrorKind::Custom("Max retries".into()),
-                });
             }
         }
     }
 
     pub async fn check_balance(&self) {
-        // Throw error if balance is less than min
-        if let Ok(balance) = self
+        debug!("Checking balance for signer: {}", self.signer().pubkey());
+        let balance = self
             .rpc_client
-            .get_balance(&self.fee_payer().pubkey())
+            .get_balance(&self.signer().pubkey())
             .await
-        {
-            if balance <= sol_to_lamports(MIN_SOL_BALANCE) {
-                panic!(
-                    "{} Insufficient balance: {} SOL\nPlease top up with at least {} SOL",
-                    "ERROR".bold().red(),
-                    lamports_to_sol(balance),
-                    MIN_SOL_BALANCE
-                );
-            }
+            .unwrap_or(0);
+        debug!("Current balance: {} ETH", lamports_to_sol(balance));
+        if balance < sol_to_lamports(MIN_ETH_BALANCE) {
+            error!(
+                "Insufficient balance: {} ETH < {} ETH",
+                lamports_to_sol(balance),
+                MIN_ETH_BALANCE
+            );
+            panic!(
+                "Insufficient balance: {} ETH < {} ETH",
+                lamports_to_sol(balance),
+                MIN_ETH_BALANCE
+            );
         }
-    }
-
-    // TODO
-    fn _simulate(&self) {
-
-        // Simulate tx
-        // let mut sim_attempts = 0;
-        // 'simulate: loop {
-        //     let sim_res = client
-        //         .simulate_transaction_with_config(
-        //             &tx,
-        //             RpcSimulateTransactionConfig {
-        //                 sig_verify: false,
-        //                 replace_recent_blockhash: true,
-        //                 commitment: Some(self.rpc_client.commitment()),
-        //                 encoding: Some(UiTransactionEncoding::Base64),
-        //                 accounts: None,
-        //                 min_context_slot: Some(slot),
-        //                 inner_instructions: false,
-        //             },
-        //         )
-        //         .await;
-        //     match sim_res {
-        //         Ok(sim_res) => {
-        //             if let Some(err) = sim_res.value.err {
-        //                 println!("Simulaton error: {:?}", err);
-        //                 sim_attempts += 1;
-        //             } else if let Some(units_consumed) = sim_res.value.units_consumed {
-        //                 if dynamic_cus {
-        //                     println!("Dynamic CUs: {:?}", units_consumed);
-        //                     let cu_budget_ix = ComputeBudgetInstruction::set_compute_unit_limit(
-        //                         units_consumed as u32 + 1000,
-        //                     );
-        //                     let cu_price_ix =
-        //                         ComputeBudgetInstruction::set_compute_unit_price(self.priority_fee);
-        //                     let mut final_ixs = vec![];
-        //                     final_ixs.extend_from_slice(&[cu_budget_ix, cu_price_ix]);
-        //                     final_ixs.extend_from_slice(ixs);
-        //                     tx = Transaction::new_with_payer(&final_ixs, Some(&signer.pubkey()));
-        //                 }
-        //                 break 'simulate;
-        //             }
-        //         }
-        //         Err(err) => {
-        //             println!("Simulaton error: {:?}", err);
-        //             sim_attempts += 1;
-        //         }
-        //     }
-
-        //     // Abort if sim fails
-        //     if sim_attempts.gt(&SIMULATION_RETRIES) {
-        //         return Err(ClientError {
-        //             request: None,
-        //             kind: ClientErrorKind::Custom("Simulation failed".into()),
-        //         });
-        //     }
-        // }
     }
 }
 

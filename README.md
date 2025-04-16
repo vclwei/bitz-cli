@@ -1,13 +1,13 @@
-# ORE CLI
+# BITZ Collector
 
-A command line interface for ORE cryptocurrency mining.
+A command line interface for BITZ cryptocurrency collecting.
 
 ## 📦 Install
 
 To install the CLI, use [cargo](https://doc.rust-lang.org/cargo/getting-started/installation.html):
 
 ```sh
-cargo install ore-cli
+cargo install bitz
 ```
 
 
@@ -34,12 +34,12 @@ export CPPFLAGS="-I/usr/local/opt/openssl/include"
 choco install openssl pkgconfiglite
 ```
 
-## ⛏️ Mine
+## ⛏️ Collect
 
-To start mining, load your keypair with some SOL, and then use the `mine` command:
+To start collecting, load your keypair with some ETH, and then use the `collect` command:
 
 ```sh
-ore mine
+bitz collect
 ```
 
 ## ❓ Help
@@ -47,7 +47,5 @@ ore mine
 Add the `-h` flag on any command to pull up a help menu with documentation:
 
 ```sh
-ore -h
+bitz -h
 ```
-
-For support, please [join the Discord](https://discord.gg/7xymAXZP8Y) and ask your question in the Help channel.

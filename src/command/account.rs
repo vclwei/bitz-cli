@@ -1,15 +1,24 @@
 use std::str::FromStr;
 
 use colored::Colorize;
-use ore_api::state::proof_pda;
-use solana_program::{pubkey::Pubkey, native_token::lamports_to_sol};
+use eore_api::state::proof_pda;
+use solana_program::{native_token::lamports_to_sol, pubkey::Pubkey};
 use solana_sdk::signature::Signer;
 use spl_token::amount_to_ui_amount;
-use tabled::{Table, settings::{Style, Remove, object::{Rows, Columns}, Alignment}};
+use tabled::{
+    settings::{
+        object::{Columns, Rows},
+        Alignment, Remove, Style,
+    },
+    Table,
+};
 
 use crate::{
     args::{AccountArgs, AccountCloseArgs, AccountCommand, ClaimArgs},
-    utils::{amount_u64_to_f64, ask_confirm, format_timestamp, get_proof, get_proof_with_authority, ComputeBudget, TableData, TableSectionTitle},
+    utils::{
+        amount_u64_to_f64, ask_confirm, format_timestamp, get_proof, get_proof_with_authority,
+        ComputeBudget, TableData, TableSectionTitle,
+    },
     Miner,
 };
 
@@ -40,7 +49,7 @@ impl Miner {
             signer.pubkey()
         };
 
-        // Aggregate data   
+        // Aggregate data
         let mut data = vec![];
         self.get_account_data(address, &mut data).await;
         self.get_proof_data(address, &mut data).await;
@@ -52,7 +61,7 @@ impl Miner {
         table.with(Style::blank());
         table.section_title(0, "Account");
         table.section_title(3, "Proof");
- 
+
         println!("{table}\n");
     }
 
@@ -69,8 +78,10 @@ impl Miner {
             return;
         };
 
-        // Aggregate data   
-        let proof = get_proof(&self.rpc_client, proof_address).await.expect("Failed to fetch proof account");
+        // Aggregate data
+        let proof = get_proof(&self.rpc_client, proof_address)
+            .await
+            .expect("Failed to fetch proof account");
         let mut data = vec![];
         self.get_account_data(proof.authority, &mut data).await;
         self.get_proof_data(proof.authority, &mut data).await;
@@ -82,15 +93,15 @@ impl Miner {
         table.with(Style::blank());
         table.section_title(0, "Account");
         table.section_title(3, "Proof");
- 
+
         println!("{table}\n");
     }
 
     async fn get_account_data(&self, authority: Pubkey, data: &mut Vec<TableData>) {
-        // Get ORE balance
+        // Get BITZ balance
         let token_account_address = spl_associated_token_account::get_associated_token_address(
             &authority,
-            &ore_api::consts::MINT_ADDRESS,
+            &eore_api::consts::MINT_ADDRESS,
         );
         let token_balance = if let Ok(Some(token_account)) = self
             .rpc_client
@@ -102,8 +113,12 @@ impl Miner {
             "0".to_string()
         };
 
-        // Get SOL balance
-        let sol_balance = self.rpc_client.get_balance(&authority).await.expect("Failed to fetch SOL balance");
+        // Get ETH balance
+        let sol_balance = self
+            .rpc_client
+            .get_balance(&authority)
+            .await
+            .expect("Failed to fetch ETH balance");
 
         // Aggregate data
         data.push(TableData {
@@ -112,11 +127,11 @@ impl Miner {
         });
         data.push(TableData {
             key: "Balance".to_string(),
-            value: format!("{} ORE", token_balance),
+            value: format!("{} BITZ", token_balance),
         });
         data.push(TableData {
-            key: "SOL".to_string(),
-            value: format!("{} SOL", lamports_to_sol(sol_balance)),
+            key: "ETH".to_string(),
+            value: format!("{} ETH", lamports_to_sol(sol_balance)),
         });
     }
 
@@ -138,10 +153,13 @@ impl Miner {
             data.push(TableData {
                 key: "Balance".to_string(),
                 value: if proof.balance > 0 {
-                    format!("{} ORE", amount_u64_to_f64(proof.balance)).bold().yellow().to_string()
+                    format!("{} BITZ", amount_u64_to_f64(proof.balance))
+                        .bold()
+                        .yellow()
+                        .to_string()
                 } else {
-                    format!("{} ORE", amount_u64_to_f64(proof.balance))
-                }
+                    format!("{} BITZ", amount_u64_to_f64(proof.balance))
+                },
             });
             data.push(TableData {
                 key: "Last hash".to_string(),
@@ -157,7 +175,10 @@ impl Miner {
             });
             data.push(TableData {
                 key: "Lifetime rewards".to_string(),
-                value: format!("{} ORE", amount_to_ui_amount(proof.total_rewards, ore_api::consts::TOKEN_DECIMALS)),
+                value: format!(
+                    "{} BITZ",
+                    amount_to_ui_amount(proof.total_rewards, eore_api::consts::TOKEN_DECIMALS)
+                ),
             });
             data.push(TableData {
                 key: "Miner".to_string(),
@@ -174,13 +195,15 @@ impl Miner {
     async fn close(&self, _args: AccountCloseArgs) {
         // Confirm proof exists
         let signer = self.signer();
-        let proof = get_proof_with_authority(&self.rpc_client, signer.pubkey()).await.expect("Failed to fetch proof account");
+        let proof = get_proof_with_authority(&self.rpc_client, signer.pubkey())
+            .await
+            .expect("Failed to fetch proof account");
 
         // Confirm the user wants to close.
         if !ask_confirm(
-            format!("{} You have {} ORE staked in this account.\nAre you sure you want to {}close this account? [Y/n]", 
-                "WARNING".yellow(),
-                amount_to_ui_amount(proof.balance, ore_api::consts::TOKEN_DECIMALS),
+            format!("{} You have {} BITZ staked in this account.\nAre you sure you want to {}close this account? [Y/n]", 
+                "WARNING:".bold().yellow(),
+                amount_to_ui_amount(proof.balance, eore_api::consts::TOKEN_DECIMALS),
                 if proof.balance.gt(&0) { "claim your stake and "} else { "" }
             ).as_str()
         ) {
@@ -198,7 +221,7 @@ impl Miner {
         }
 
         // Submit close transaction
-        let ix = ore_api::sdk::close(signer.pubkey());
+        let ix = eore_api::sdk::close(signer.pubkey());
         self.send_and_confirm(&[ix], ComputeBudget::Fixed(500_000), false)
             .await
             .ok();
