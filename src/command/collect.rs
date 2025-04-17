@@ -22,6 +22,7 @@ use eore_api::{
     event::MineEvent,
     state::{proof_pda, Bus, Config},
 };
+use log::{info, warn};
 use rand::Rng;
 use solana_program::pubkey::Pubkey;
 use solana_rpc_client::spinner;
@@ -67,15 +68,16 @@ impl Miner {
     }
 
     async fn collect_solo(&self, args: CollectArgs) {
+        info!("collect_solo");
         // Open account, if needed.
         self.open().await;
 
         // Check num threads
         let cores_str = args.cores;
         let cores = if cores_str == "ALL" {
-            num_cpus::get() as u64
+            (num_cpus::get() * 2) as u64
         } else {
-            cores_str.parse::<u64>().unwrap()
+            cores_str.parse::<u64>().unwrap() * 2
         };
         self.check_num_cores(cores);
 
@@ -92,10 +94,12 @@ impl Miner {
         loop {
             // Fetch accounts
             let config = get_config(&self.rpc_client).await;
+            info!("config: {:?}", config);
             let proof =
                 get_updated_proof_with_authority(&self.rpc_client, signer.pubkey(), last_hash_at)
                     .await
                     .expect("Failed to fetch proof account");
+            info!("proof: {:?}", proof);
 
             // Log collecting table
             self.update_solo_collecting_table(verbose);
@@ -282,23 +286,36 @@ impl Miner {
         let global_best_difficulty = Arc::new(RwLock::new(0u32));
 
         progress_bar.set_message("Collecting...");
-        let core_ids = core_affinity::get_core_ids().expect("Failed to fetch core count");
-        let core_ids = core_ids.into_iter().filter(|id| id.id < (cores as usize));
-        let handles: Vec<_> = core_ids
+        let core_count = core_affinity::get_core_ids()
+            .map(|ids| ids.len())
+            .unwrap_or(1);
+        let handles: Vec<_> = (0..cores)
             .map(|i| {
                 let global_best_difficulty = Arc::clone(&global_best_difficulty);
                 std::thread::spawn({
                     let progress_bar = progress_bar.clone();
-                    let nonce = nonce_indices[i.id];
+                    let nonce = nonce_indices[i as usize];
                     let mut memory = equix::SolverMemory::new();
                     let pool_channel = pool_channel.clone();
                     move || {
-                        // Pin to core
-                        let _ = core_affinity::set_for_current(i);
+                        // Pin to core if possible
+                        if let Some(core_ids) = core_affinity::get_core_ids() {
+                            // 计算实际的物理核心索引，每个核心分配两个线程
+                            let physical_core_index = (i as usize) / core_count;
+                            if let Some(core_id) = core_ids.get(physical_core_index) {
+                                let _ = core_affinity::set_for_current(*core_id);
+                            }
+                        }
 
                         // Start hashing
                         let timer = Instant::now();
                         let mut nonce = nonce;
+                        // 根据线程在核心内的索引调整起始 nonce
+                        let thread_in_core = (i as usize) % core_count;
+                        if thread_in_core == 1 {
+                            // 第二个线程从中间开始
+                            nonce = nonce.saturating_add(u64::MAX / (cores * 2));
+                        }
                         let mut best_nonce = nonce;
                         let mut best_difficulty = 0;
                         let mut best_hash = Hash::default();
@@ -345,7 +362,7 @@ impl Miner {
                                 let global_best_difficulty =
                                     *global_best_difficulty.read().unwrap();
                                 if timer.elapsed().as_secs().ge(&cutoff_time) {
-                                    if i.id == 0 {
+                                    if i == 0 {
                                         progress_bar.set_message(format!(
                                             "Collecting...\n  Best score: {}",
                                             global_best_difficulty,
@@ -355,7 +372,7 @@ impl Miner {
                                         // Collect until min difficulty has been met
                                         break;
                                     }
-                                } else if i.id == 0 {
+                                } else if i == 0 {
                                     progress_bar.set_message(format!(
                                         "Collecting...\n  Best score: {}\n  Time remaining: {}",
                                         global_best_difficulty,
